@@ -30,89 +30,7 @@ use wasm_bindgen::prelude::*;
 
 mod level;
 mod texture;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // Remember to change this if the Vertex struct changes
-                // This attribute corresponds to the `position` field of `Vertex`
-                wgpu::VertexAttribute {
-                    offset: 0,          // Offset in bytes is zero as this is the first attribute
-                    shader_location: 0, // This is 0 as in the shader we decorate `position` in `VertexInput` in the shader file with `@location(0)`
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                // This attribute corresponds to the `tex_coords` field of `Vertex`
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress, // Offset is the size of the first attribute - remember to change this if the size of `position` changes
-                    shader_location: 1, // This is 1 as in the shader we decorate `tex_coords` in `VertexInput` in the shader file with `@location(1)`
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ], // Can use the wgpu::vertex_attr_array! macro to make this easier later
-        }
-    }
-}
-
-struct Instance {
-    position: cgmath::Vector3<f32>, // I think I don't need a z-coordinate for 2D but we can switch to that later
-                                    // I think for my purposes (2D) I don't need a rotation quaternion
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: cgmath::Matrix4::from_translation(self.position).into(),
-        }
-    }
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            // Using Instance mode - this means that shaders will only change to use the next instance when the shader starts processing a new instance
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We'll have to reassemble the mat4 in the shader.
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    // Saving spots 0-4 for the Vertex (for some reason yet unknown to me).
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 6,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 7,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
-                    shader_location: 8,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
+mod graphics;
 
 struct Target {
     ndc_position: cgmath::Vector3<f32>,
@@ -130,7 +48,7 @@ struct State<'a> {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     target_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
+    instances: Vec<graphics::Instance>,
     instance_buffer: wgpu::Buffer,
 
     cursor_position: winit::dpi::PhysicalPosition<f64>,
@@ -166,7 +84,7 @@ struct State<'a> {
     window: &'a Window,
 }
 
-fn get_circle_vertices(num_vertices: u32, surface_width: u32, surface_height: u32) -> Vec<Vertex> {
+fn get_circle_vertices(num_vertices: u32, surface_width: u32, surface_height: u32) -> Vec<graphics::Vertex> {
     let angle = std::f32::consts::PI * 2.0 / num_vertices as f32;
 
     let ratio = surface_width as f32 / surface_height as f32;
@@ -174,10 +92,10 @@ fn get_circle_vertices(num_vertices: u32, surface_width: u32, surface_height: u3
     (0..num_vertices)
         .map(|i| {
             let theta = angle * i as f32;
-            Vertex {
-                position: [0.25 * theta.cos() / ratio, 0.25 * theta.sin(), 0.0],
-                tex_coords: [(1.0 + theta.cos()) / 2.0, (1.0 - theta.sin()) / 2.0],
-            }
+            graphics::Vertex::new(
+                [0.25 * theta.cos() / ratio, 0.25 * theta.sin(), 0.0],
+                [(1.0 + theta.cos()) / 2.0, (1.0 - theta.sin()) / 2.0],
+            )
         })
         .collect::<Vec<_>>()
 }
@@ -357,7 +275,7 @@ impl<'a> State<'a> {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main", // Remember to change this if we change the name of the vertex shader function
-                buffers: &[Vertex::desc(), Instance::desc()],
+                buffers: &[graphics::Vertex::desc(), graphics::Instance::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -415,11 +333,11 @@ impl<'a> State<'a> {
         const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(0.0, 0.0, 0.0);
 
         let instances = vec![
-            Instance { position: CENTER }, // The target
-            Instance { position: CENTER }, // The crosshair
+            graphics::Instance { position: CENTER }, // The target
+            graphics::Instance { position: CENTER }, // The crosshair
         ];
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances.iter().map(graphics::Instance::to_raw).collect::<Vec<_>>();
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
@@ -836,7 +754,7 @@ impl<'a> State<'a> {
         let instance_data = self
             .instances
             .iter()
-            .map(Instance::to_raw)
+            .map(graphics::Instance::to_raw)
             .collect::<Vec<_>>();
         self.queue.write_buffer(
             &self.instance_buffer,
