@@ -1,7 +1,6 @@
-
 pub struct Instance {
     pub position: cgmath::Vector3<f32>, // I think I don't need a z-coordinate for 2D but we can switch to that later
-    // I think for my purposes (2D) I don't need a rotation quaternion
+                                        // I think for my purposes (2D) I don't need a rotation quaternion
 }
 
 #[repr(C)]

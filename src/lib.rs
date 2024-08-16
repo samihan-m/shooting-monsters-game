@@ -15,7 +15,10 @@ use wgpu_text::{
     BrushBuilder, TextBrush,
 };
 use winit::{
-    event::*, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Icon, Window, WindowBuilder}
+    event::*,
+    event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Icon, Window, WindowBuilder},
 };
 
 // TODO:
@@ -28,9 +31,9 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+mod graphics;
 mod level;
 mod texture;
-mod graphics;
 
 struct Target {
     ndc_position: cgmath::Vector3<f32>,
@@ -54,8 +57,6 @@ struct State<'a> {
     cursor_position: winit::dpi::PhysicalPosition<f64>,
     target: Target,
     rng: ThreadRng,
-
-    num_vertices: u32,
 
     crosshair_bind_group: wgpu::BindGroup,
 
@@ -84,20 +85,15 @@ struct State<'a> {
     window: &'a Window,
 }
 
-fn get_circle_vertices(num_vertices: u32, surface_width: u32, surface_height: u32) -> Vec<graphics::Vertex> {
-    let angle = std::f32::consts::PI * 2.0 / num_vertices as f32;
-
+fn get_monster_vertices(surface_width: u32, surface_height: u32) -> Vec<graphics::Vertex> {
     let ratio = surface_width as f32 / surface_height as f32;
 
-    (0..num_vertices)
-        .map(|i| {
-            let theta = angle * i as f32;
-            graphics::Vertex::new(
-                [0.25 * theta.cos() / ratio, 0.25 * theta.sin(), 0.0],
-                [(1.0 + theta.cos()) / 2.0, (1.0 - theta.sin()) / 2.0],
-            )
-        })
-        .collect::<Vec<_>>()
+    vec![
+        graphics::Vertex::new([-0.25 / ratio, -0.25, 0.0], [0.0, 1.0]),
+        graphics::Vertex::new([0.25 / ratio, -0.25, 0.0], [1.0, 1.0]),
+        graphics::Vertex::new([0.25 / ratio, 0.25, 0.0], [1.0, 0.0]),
+        graphics::Vertex::new([-0.25 / ratio, 0.25, 0.0], [0.0, 0.0]),
+    ]
 }
 
 const INITIAL_ROUND_LENGTH_SECONDS: f64 = 60.0;
@@ -309,8 +305,7 @@ impl<'a> State<'a> {
             cache: None, // Enables caching shader compilation data - only really useful for Android build targets
         });
 
-        let num_vertices = 64;
-        let vertices = get_circle_vertices(num_vertices, config.width, config.height);
+        let vertices = get_monster_vertices(config.width, config.height);
 
         let num_triangles = vertices.len() as u16 - 2;
         let indices = (1u16..=num_triangles)
@@ -337,7 +332,10 @@ impl<'a> State<'a> {
             graphics::Instance { position: CENTER }, // The crosshair
         ];
 
-        let instance_data = instances.iter().map(graphics::Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances
+            .iter()
+            .map(graphics::Instance::to_raw)
+            .collect::<Vec<_>>();
 
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
@@ -517,7 +515,6 @@ impl<'a> State<'a> {
             cursor_position,
             target,
             rng,
-            num_vertices,
 
             crosshair_bind_group,
 
@@ -586,7 +583,7 @@ impl<'a> State<'a> {
             self.target.pixels_radius = target_radius_pixels;
 
             // Update the vertices to match the new size
-            let vertices = get_circle_vertices(self.num_vertices, new_size.width, new_size.height);
+            let vertices = get_monster_vertices(new_size.width, new_size.height);
             self.queue
                 .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
         }

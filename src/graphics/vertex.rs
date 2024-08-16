@@ -1,4 +1,3 @@
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -8,7 +7,10 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn new(position: [f32; 3], tex_coords: [f32; 2]) -> Self {
-        Vertex { position, tex_coords }
+        Vertex {
+            position,
+            tex_coords,
+        }
     }
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
