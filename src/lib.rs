@@ -50,7 +50,7 @@ struct State<'a> {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     target_bind_group: wgpu::BindGroup,
-    instances: Vec<graphics::Instance>,
+    instances: [graphics::Instance; 2],
     instance_buffer: wgpu::Buffer,
 
     cursor_position: winit::dpi::PhysicalPosition<f64>,
@@ -333,7 +333,7 @@ impl<'a> State<'a> {
 
         const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(0.0, 0.0, 0.0);
 
-        let instances = vec![
+        let instances = [
             graphics::Instance { position: CENTER }, // The target
             graphics::Instance { position: CENTER }, // The crosshair
         ];
@@ -750,11 +750,11 @@ impl<'a> State<'a> {
         }
 
         // Update the instance buffer with the latest position of the target
-        let target = self.instances.get_mut(0).unwrap(); // Am okay with unwrapping as we know we have one instance (defined in ::new())
+        let target = &mut self.instances[0];
         target.position = self.target.ndc_position;
 
         // Update the crosshair instance buffer with the latest cursor position
-        let crosshair = self.instances.get_mut(1).unwrap(); // Am okay with unwrapping as we know we have one instance (defined in ::new())
+        let crosshair = &mut self.instances[1];
         let crosshair_ndc_position = cgmath::Vector3::new(
             (self.cursor_position.x as f32 / self.size.width as f32) * 2.0 - 1.0,
             -((self.cursor_position.y as f32 / self.size.height as f32) * 2.0 - 1.0),
