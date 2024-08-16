@@ -1,4 +1,3 @@
-use cgmath::InnerSpace;
 use fyrox_sound::{
     buffer::{SoundBufferResource, SoundBufferResourceExtension},
     context::SoundContext,
@@ -37,7 +36,7 @@ mod texture;
 
 struct Target {
     ndc_position: cgmath::Vector3<f32>,
-    pixels_radius: f32,
+    monster_scale: f32,
 }
 
 struct State<'a> {
@@ -57,6 +56,8 @@ struct State<'a> {
     cursor_position: winit::dpi::PhysicalPosition<f64>,
     target: Target,
     rng: ThreadRng,
+
+    monster_scale: f32,
 
     crosshair_bind_group: wgpu::BindGroup,
 
@@ -85,14 +86,18 @@ struct State<'a> {
     window: &'a Window,
 }
 
-fn get_monster_vertices(surface_width: u32, surface_height: u32) -> Vec<graphics::Vertex> {
+fn get_square_vertices(
+    surface_width: u32,
+    surface_height: u32,
+    scale: f32,
+) -> [graphics::Vertex; 4] {
     let ratio = surface_width as f32 / surface_height as f32;
 
-    vec![
-        graphics::Vertex::new([-0.25 / ratio, -0.25, 0.0], [0.0, 1.0]),
-        graphics::Vertex::new([0.25 / ratio, -0.25, 0.0], [1.0, 1.0]),
-        graphics::Vertex::new([0.25 / ratio, 0.25, 0.0], [1.0, 0.0]),
-        graphics::Vertex::new([-0.25 / ratio, 0.25, 0.0], [0.0, 0.0]),
+    [
+        graphics::Vertex::new([-scale / ratio, -scale, 0.0], [0.0, 1.0]), // Bottom left
+        graphics::Vertex::new([scale / ratio, -scale, 0.0], [1.0, 1.0]),  // Bottom right
+        graphics::Vertex::new([scale / ratio, scale, 0.0], [1.0, 0.0]),   // Top right
+        graphics::Vertex::new([-scale / ratio, scale, 0.0], [0.0, 0.0]),  // Top left
     ]
 }
 
@@ -305,7 +310,8 @@ impl<'a> State<'a> {
             cache: None, // Enables caching shader compilation data - only really useful for Android build targets
         });
 
-        let vertices = get_monster_vertices(config.width, config.height);
+        let monster_scale = 0.25;
+        let vertices = get_square_vertices(config.width, config.height, monster_scale);
 
         let num_triangles = vertices.len() as u16 - 2;
         let indices = (1u16..=num_triangles)
@@ -344,11 +350,10 @@ impl<'a> State<'a> {
         });
 
         let cursor_position = winit::dpi::PhysicalPosition::new(0.0, 0.0);
-        let target_radius_pixels: f32 = 15.0 * (config.width as f32 / 800.0); // 10 pixels on an 800x600 screen
 
         let target = Target {
             ndc_position: CENTER,
-            pixels_radius: target_radius_pixels,
+            monster_scale: monster_scale,
         };
 
         let rng = rand::thread_rng();
@@ -516,6 +521,8 @@ impl<'a> State<'a> {
             target,
             rng,
 
+            monster_scale,
+
             crosshair_bind_group,
 
             sound_context,
@@ -580,10 +587,10 @@ impl<'a> State<'a> {
 
             // Resize the target
             let target_radius_pixels: f32 = 10.0 * (new_size.width as f32 / 800.0); // 10 pixels on an 800x600 screen
-            self.target.pixels_radius = target_radius_pixels;
+            self.target.monster_scale = target_radius_pixels;
 
             // Update the vertices to match the new size
-            let vertices = get_monster_vertices(new_size.width, new_size.height);
+            let vertices = get_square_vertices(new_size.width, new_size.height, self.monster_scale);
             self.queue
                 .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
         }
@@ -620,24 +627,31 @@ impl<'a> State<'a> {
                     .unwrap();
                 self.sound_context.state().add_source(gunshot_source);
 
-                // Check if the cursor is within the target
-                let cursor = cgmath::Vector2::new(
-                    self.cursor_position.x as f32,
-                    self.cursor_position.y as f32,
-                );
+                let is_cursor_on_monster = {
+                    let cursor_ndc = cgmath::Vector2::new(
+                        (self.cursor_position.x as f32 / self.size.width as f32) * 2.0 - 1.0,
+                        -((self.cursor_position.y as f32 / self.size.height as f32) * 2.0 - 1.0),
+                    );
 
-                let target_physical_location = cgmath::Vector2::new(
-                    (self.target.ndc_position.x / 2.0 + 0.5) * self.size.width as f32,
-                    (-self.target.ndc_position.y / 2.0 + 0.5) * self.size.height as f32, // The negation is required so that the y value is _not_ mirrored about the x-axis
-                );
+                    let [bottom_left_vertex, _, top_right_vertex, _] =
+                        get_square_vertices(self.size.width, self.size.height, self.monster_scale);
 
-                let distance = (cursor - target_physical_location).magnitude();
-                // println!(
-                //     "Cursor position: {:?}, Target position: {:?}, Distance: {}",
-                //     cursor, target_physical_location, distance
-                // );
+                    let [min_x_ndc, min_y_ndc, _] = bottom_left_vertex.position();
+                    let [max_x_ndc, max_y_ndc, _] = top_right_vertex.position();
+                    // These bounds are for the target if it was at the origin - they need to be adjusted to correspond to the instance position
 
-                if distance < self.target.pixels_radius {
+                    let target_min_x_ndc = self.target.ndc_position.x + min_x_ndc; // min_x is already negative so don't subtract it
+                    let target_max_x_ndc = self.target.ndc_position.x + max_x_ndc;
+                    let target_min_y_ndc = self.target.ndc_position.y + min_y_ndc; // min_y is already negative so don't subtract it
+                    let target_max_y_ndc = self.target.ndc_position.y + max_y_ndc;
+
+                    cursor_ndc.x >= target_min_x_ndc
+                        && cursor_ndc.x <= target_max_x_ndc
+                        && cursor_ndc.y >= target_min_y_ndc
+                        && cursor_ndc.y <= target_max_y_ndc
+                };
+
+                if is_cursor_on_monster {
                     // Play the screech noise
                     let screech_source = SoundSourceBuilder::new()
                         .with_buffer(self.screech_buffer.clone())

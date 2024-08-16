@@ -1,6 +1,7 @@
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
+    /// Position is in normalized device coordinates
     position: [f32; 3],
     tex_coords: [f32; 2],
 }
@@ -11,6 +12,10 @@ impl Vertex {
             position,
             tex_coords,
         }
+    }
+
+    pub fn position(&self) -> &[f32; 3] {
+        &self.position
     }
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
