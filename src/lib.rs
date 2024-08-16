@@ -4,6 +4,7 @@ use fyrox_sound::{
     engine::SoundEngine,
     source::SoundSourceBuilder,
 };
+use graphics::CENTER;
 use rand::{rngs::ThreadRng, Rng};
 use wgpu::util::DeviceExt;
 
@@ -35,7 +36,7 @@ mod level;
 mod texture;
 
 struct Target {
-    ndc_position: cgmath::Vector3<f32>,
+    ndc_position: cgmath::Vector2<f32>,
     monster_scale: f32,
 }
 
@@ -94,10 +95,10 @@ fn get_square_vertices(
     let ratio = surface_width as f32 / surface_height as f32;
 
     [
-        graphics::Vertex::new([-scale / ratio, -scale, 0.0], [0.0, 1.0]), // Bottom left
-        graphics::Vertex::new([scale / ratio, -scale, 0.0], [1.0, 1.0]),  // Bottom right
-        graphics::Vertex::new([scale / ratio, scale, 0.0], [1.0, 0.0]),   // Top right
-        graphics::Vertex::new([-scale / ratio, scale, 0.0], [0.0, 0.0]),  // Top left
+        graphics::Vertex::new([-scale / ratio, -scale], [0.0, 1.0]), // Bottom left
+        graphics::Vertex::new([scale / ratio, -scale], [1.0, 1.0]),  // Bottom right
+        graphics::Vertex::new([scale / ratio, scale], [1.0, 0.0]),   // Top right
+        graphics::Vertex::new([-scale / ratio, scale], [0.0, 0.0]),  // Top left
     ]
 }
 
@@ -330,8 +331,6 @@ impl<'a> State<'a> {
             contents: bytemuck::cast_slice(&indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-
-        const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(0.0, 0.0, 0.0);
 
         let instances = [
             graphics::Instance { position: CENTER }, // The target
@@ -636,8 +635,8 @@ impl<'a> State<'a> {
                     let [bottom_left_vertex, _, top_right_vertex, _] =
                         get_square_vertices(self.size.width, self.size.height, self.monster_scale);
 
-                    let [min_x_ndc, min_y_ndc, _] = bottom_left_vertex.position();
-                    let [max_x_ndc, max_y_ndc, _] = top_right_vertex.position();
+                    let [min_x_ndc, min_y_ndc] = bottom_left_vertex.position();
+                    let [max_x_ndc, max_y_ndc] = top_right_vertex.position();
                     // These bounds are for the target if it was at the origin - they need to be adjusted to correspond to the instance position
 
                     let target_min_x_ndc = self.target.ndc_position.x + min_x_ndc; // min_x is already negative so don't subtract it
@@ -665,10 +664,9 @@ impl<'a> State<'a> {
                     // Move target
                     let distribution = rand::distributions::Uniform::new(-1.0, 1.0);
 
-                    self.target.ndc_position = cgmath::Vector3::new(
+                    self.target.ndc_position = cgmath::Vector2::new(
                         self.rng.sample(distribution),
                         self.rng.sample(distribution),
-                        0.0,
                     );
 
                     if self.hit_count == 0 {
@@ -709,12 +707,12 @@ impl<'a> State<'a> {
                 {
                     self.start_time = None;
                     self.hit_count = 0;
-                    self.target.ndc_position = cgmath::Vector3::new(0.0, 0.0, 0.0);
+                    self.target.ndc_position = CENTER;
                 } else if self.current_level >= self.levels.len() {
                     // If the player has won, reset the game
                     self.start_time = None;
                     self.hit_count = 0;
-                    self.target.ndc_position = cgmath::Vector3::new(0.0, 0.0, 0.0);
+                    self.target.ndc_position = CENTER;
                     self.current_level = 0;
                 }
 
@@ -755,10 +753,9 @@ impl<'a> State<'a> {
 
         // Update the crosshair instance buffer with the latest cursor position
         let crosshair = &mut self.instances[1];
-        let crosshair_ndc_position = cgmath::Vector3::new(
+        let crosshair_ndc_position = cgmath::Vector2::new(
             (self.cursor_position.x as f32 / self.size.width as f32) * 2.0 - 1.0,
             -((self.cursor_position.y as f32 / self.size.height as f32) * 2.0 - 1.0),
-            0.0,
         );
         crosshair.position = crosshair_ndc_position;
 

@@ -1,7 +1,9 @@
 pub struct Instance {
-    pub position: cgmath::Vector3<f32>, // I think I don't need a z-coordinate for 2D but we can switch to that later
-                                        // I think for my purposes (2D) I don't need a rotation quaternion
+    pub position: cgmath::Vector2<f32>,
+    // I think for my purposes (2D) I don't need a rotation quaternion
 }
+
+pub const CENTER: cgmath::Vector2<f32> = cgmath::Vector2 { x: 0.0, y: 0.0 };
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -12,7 +14,12 @@ pub struct InstanceRaw {
 impl Instance {
     pub fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
-            model: cgmath::Matrix4::from_translation(self.position).into(),
+            model: cgmath::Matrix4::from_translation(cgmath::Vector3::new(
+                self.position.x,
+                self.position.y,
+                0.0,
+            ))
+            .into(),
         }
     }
 
