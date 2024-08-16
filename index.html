@@ -17,21 +17,73 @@
             align-items: center;
             height: 100vh;
             width: 100vw;
+            background-color: black;
         }
 
         canvas {
-            background-color: black;
+            background-color: #010101;
+        }
+
+        .play-button {
+            background-color: transparent;
+            border: 0.18em solid darkred;
+            color: darkred;
+            padding: 0.8em 2em;
+            text-transform: uppercase;
+            font-size: 5em;
+            font-family: 'Courier New', Courier, monospace;
+            cursor: pointer;
+            /* border-radius: 1em; */
+        }
+
+        .play-button:hover {
+            border-color: red;
+            color: red;
+            text-shadow: 0 0 1em red;
+            box-shadow: 0 0 1em 0.5em darkred;
+        }
+
+        .play-button:active {
+            border-color: red;
+            color: red;
+            background-color: maroon;
+            box-shadow: 0 0 1em 0.5em red;
+        }
+
+        .pregamemenu {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .title {
+            font-size: 5em;
+            font-family: 'Courier New', Courier, monospace;
+            color: darkred;
+            text-align: center;
         }
     </style>
 </head>
 
 <body id="app">
-  <script type="module">
-      import init from "./pkg/shooting_monsters_game.js";
-      init().then(() => {
-          console.log("WASM Loaded");
-      });
-  </script>
+    <script type="module">
+        import init from "./pkg/shooting_monsters_game.js";
+        window.initWasm = init;
+    </script>
+    <script type="text/javascript">
+        function runInit() {
+            window.initWasm().then(() => {
+                let preGameMenu = document.querySelector("main");
+                preGameMenu.style.display = "none";
+                console.log("WASM module loaded");
+            });
+        }
+    </script>
+    <main class="pregamemenu">
+        <h1 class="title">Shootin' Monsters</h1>
+        <button class="play-button" onclick="runInit()">Play</button>
+    </main>
 </body>
 
 </html>
