@@ -36,8 +36,10 @@ mod level;
 mod texture;
 
 struct Target {
-    ndc_position: cgmath::Vector2<f32>,
-    monster_scale: f32,
+    /// Position is in normalized device coordinates
+    position: cgmath::Vector2<f32>,
+    /// Higher values means the monster will be larger in appearance
+    scale: f32,
 }
 
 struct State<'a> {
@@ -50,17 +52,15 @@ struct State<'a> {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    target_bind_group: wgpu::BindGroup,
+    monster_texture_bind_group: wgpu::BindGroup,
     instances: [graphics::Instance; 2],
     instance_buffer: wgpu::Buffer,
 
     cursor_position: winit::dpi::PhysicalPosition<f64>,
-    target: Target,
+    monster: Target,
     rng: ThreadRng,
 
-    monster_scale: f32,
-
-    crosshair_bind_group: wgpu::BindGroup,
+    crosshair_texture_bind_group: wgpu::BindGroup,
 
     sound_context: fyrox_sound::context::SoundContext,
     gunshot_buffer: fyrox_sound::buffer::SoundBufferResource,
@@ -93,6 +93,8 @@ fn get_square_vertices(
     scale: f32,
 ) -> [graphics::Vertex; 4] {
     let ratio = surface_width as f32 / surface_height as f32;
+    // The way this is implemented means that the width of the window has 0 impact on the size of the square, only the height does
+    // If that's a problem, change this
 
     [
         graphics::Vertex::new([-scale / ratio, -scale], [0.0, 1.0]), // Bottom left
@@ -108,25 +110,24 @@ const INITIAL_REQUIRED_HIT_COUNT: u32 = 15;
 const REQUIRED_HIT_COUNT_INCREMENT: u32 = 0;
 const NUMBER_OF_LEVELS: u32 = 10;
 
-fn get_seconds_since(start_time: web_time::Instant) -> f64 {
-    let elapsed = web_time::Instant::now() - start_time;
-    elapsed.as_secs_f64()
-}
-
 fn get_seconds_remaining_in_round(
     start_time: Option<web_time::Instant>,
     round_length_seconds: f64,
 ) -> f64 {
     match start_time {
         None => round_length_seconds,
-        Some(start_time) => round_length_seconds - get_seconds_since(start_time),
+        Some(start_time) => {
+            let elapsed = web_time::Instant::now() - start_time;
+            let elapsed_seconds = elapsed.as_secs_f64();
+            round_length_seconds - elapsed_seconds
+        }
     }
 }
 
-// Game Plan: Start a X second timer. The user has to hit the target Y times or else they lose. If they succeed, they move to the next level. X decreases with each level.
-// Keep a count of how many times they hit the target and display it top right corner (timer is top left corner)
+// The game: Start a X second timer. The user has to hit the target Y times or else they lose. If they succeed, they move to the next level. X decreases with each level.
+// Keep a count of how many times they hit the target and display (Y - it) in the top right corner (timer is top left corner)
 // The timer will start once they've hit the target once.
-// Show Game Over after time runs out.
+// Show Game Over after time runs out, or You Win if they complete all levels.
 
 impl<'a> State<'a> {
     async fn new(window: &'a Window) -> State<'a> {
@@ -191,7 +192,7 @@ impl<'a> State<'a> {
             desired_maximum_frame_latency: 2,
         };
 
-        let target_texture =
+        let monster_texture =
             texture::Texture::from_bytes(&device, &queue, include_bytes!("eyes.png"), "eyes.png")
                 .unwrap();
 
@@ -229,22 +230,23 @@ impl<'a> State<'a> {
                 label: Some("texture_bind_group_layout"),
             });
         // Defining a `BindGroupLayout` separately allows us to swap out `BindGroup`s that share the same layout
-        let target_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+
+        let monster_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&target_texture.view),
+                    resource: wgpu::BindingResource::TextureView(&monster_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&target_texture.sampler),
+                    resource: wgpu::BindingResource::Sampler(&monster_texture.sampler),
                 },
             ],
             label: Some("target_bind_group"),
         });
 
-        let crosshair_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let crosshair_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -350,9 +352,9 @@ impl<'a> State<'a> {
 
         let cursor_position = winit::dpi::PhysicalPosition::new(0.0, 0.0);
 
-        let target = Target {
-            ndc_position: CENTER,
-            monster_scale: monster_scale,
+        let monster = Target {
+            position: CENTER,
+            scale: monster_scale,
         };
 
         let rng = rand::thread_rng();
@@ -512,17 +514,15 @@ impl<'a> State<'a> {
             vertex_buffer,
             index_buffer,
             num_indices,
-            target_bind_group,
+            monster_texture_bind_group,
             instances,
             instance_buffer,
 
             cursor_position,
-            target,
+            monster,
             rng,
 
-            monster_scale,
-
-            crosshair_bind_group,
+            crosshair_texture_bind_group,
 
             sound_context,
             gunshot_buffer,
@@ -584,12 +584,8 @@ impl<'a> State<'a> {
                 &self.queue,
             );
 
-            // Resize the target
-            let target_radius_pixels: f32 = 10.0 * (new_size.width as f32 / 800.0); // 10 pixels on an 800x600 screen
-            self.target.monster_scale = target_radius_pixels;
-
             // Update the vertices to match the new size
-            let vertices = get_square_vertices(new_size.width, new_size.height, self.monster_scale);
+            let vertices = get_square_vertices(new_size.width, new_size.height, self.monster.scale);
             self.queue
                 .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
         }
@@ -621,7 +617,7 @@ impl<'a> State<'a> {
                     .with_buffer(self.gunshot_buffer.clone())
                     .with_status(fyrox_sound::source::Status::Playing)
                     .with_play_once(true)
-                    .with_gain(0.4)
+                    .with_gain(0.25)
                     .build()
                     .unwrap();
                 self.sound_context.state().add_source(gunshot_source);
@@ -633,21 +629,21 @@ impl<'a> State<'a> {
                     );
 
                     let [bottom_left_vertex, _, top_right_vertex, _] =
-                        get_square_vertices(self.size.width, self.size.height, self.monster_scale);
+                        get_square_vertices(self.size.width, self.size.height, self.monster.scale);
 
-                    let [min_x_ndc, min_y_ndc] = bottom_left_vertex.position();
-                    let [max_x_ndc, max_y_ndc] = top_right_vertex.position();
+                    let [min_x, min_y] = bottom_left_vertex.position();
+                    let [max_x, max_y] = top_right_vertex.position();
                     // These bounds are for the target if it was at the origin - they need to be adjusted to correspond to the instance position
 
-                    let target_min_x_ndc = self.target.ndc_position.x + min_x_ndc; // min_x is already negative so don't subtract it
-                    let target_max_x_ndc = self.target.ndc_position.x + max_x_ndc;
-                    let target_min_y_ndc = self.target.ndc_position.y + min_y_ndc; // min_y is already negative so don't subtract it
-                    let target_max_y_ndc = self.target.ndc_position.y + max_y_ndc;
+                    let target_min_x = self.monster.position.x + min_x; // min_x is already negative so don't subtract it
+                    let target_max_x = self.monster.position.x + max_x;
+                    let target_min_y = self.monster.position.y + min_y; // min_y is already negative so don't subtract it
+                    let target_max_y = self.monster.position.y + max_y;
 
-                    cursor_ndc.x >= target_min_x_ndc
-                        && cursor_ndc.x <= target_max_x_ndc
-                        && cursor_ndc.y >= target_min_y_ndc
-                        && cursor_ndc.y <= target_max_y_ndc
+                    cursor_ndc.x >= target_min_x
+                        && cursor_ndc.x <= target_max_x
+                        && cursor_ndc.y >= target_min_y
+                        && cursor_ndc.y <= target_max_y
                 };
 
                 if is_cursor_on_monster {
@@ -656,7 +652,7 @@ impl<'a> State<'a> {
                         .with_buffer(self.screech_buffer.clone())
                         .with_status(fyrox_sound::source::Status::Playing)
                         .with_play_once(true)
-                        .with_gain(0.6)
+                        .with_gain(0.35)
                         .build()
                         .unwrap();
                     self.sound_context.state().add_source(screech_source);
@@ -664,7 +660,7 @@ impl<'a> State<'a> {
                     // Move target
                     let distribution = rand::distributions::Uniform::new(-1.0, 1.0);
 
-                    self.target.ndc_position = cgmath::Vector2::new(
+                    self.monster.position = cgmath::Vector2::new(
                         self.rng.sample(distribution),
                         self.rng.sample(distribution),
                     );
@@ -675,16 +671,12 @@ impl<'a> State<'a> {
                     self.hit_count += 1;
 
                     // Check if the level is complete
-                    let current_level = self.levels.get(self.current_level);
-                    match current_level {
-                        Some(level) => {
-                            if self.hit_count >= level.required_hit_count() {
-                                self.current_level += 1;
-                                self.hit_count = 0;
-                                self.start_time = None;
-                            }
+                    if let Some(level) = self.levels.get(self.current_level) {
+                        if self.hit_count >= level.required_hit_count() {
+                            self.current_level += 1;
+                            self.hit_count = 0;
+                            self.start_time = None;
                         }
-                        None => {}
                     }
                 }
 
@@ -707,12 +699,12 @@ impl<'a> State<'a> {
                 {
                     self.start_time = None;
                     self.hit_count = 0;
-                    self.target.ndc_position = CENTER;
+                    self.monster.position = CENTER;
                 } else if self.current_level >= self.levels.len() {
                     // If the player has won, reset the game
                     self.start_time = None;
                     self.hit_count = 0;
-                    self.target.ndc_position = CENTER;
+                    self.monster.position = CENTER;
                     self.current_level = 0;
                 }
 
@@ -749,7 +741,7 @@ impl<'a> State<'a> {
 
         // Update the instance buffer with the latest position of the target
         let target = &mut self.instances[0];
-        target.position = self.target.ndc_position;
+        target.position = self.monster.position;
 
         // Update the crosshair instance buffer with the latest cursor position
         let crosshair = &mut self.instances[1];
@@ -807,16 +799,17 @@ impl<'a> State<'a> {
                 timestamp_writes: None,
             });
 
-            // Draw target
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.target_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+
+            // Draw target
+            render_pass.set_bind_group(0, &self.monster_texture_bind_group, &[]);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
 
             // Draw crosshair
-            render_pass.set_bind_group(0, &self.crosshair_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.crosshair_texture_bind_group, &[]);
             render_pass.draw_indexed(0..self.num_indices, 0, 1..2);
 
             // Draw text
