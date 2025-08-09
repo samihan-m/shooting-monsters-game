@@ -63,6 +63,15 @@
             color: darkred;
             text-align: center;
         }
+
+        button[disabled], button[disabled]:hover, button[disabled]:active {
+            border-color: gray;
+            color: gray;
+            background-color: transparent;
+            cursor: not-allowed;
+            box-shadow: none;
+            text-shadow: none;
+        }
     </style>
 </head>
 
@@ -70,19 +79,41 @@
     <script type="module">
         import init from "./pkg/shooting_monsters_game.js";
         window.initWasm = init;
+        document.addEventListener("DOMContentLoaded", () => {
+            const playButton = document.getElementById("play-button");
+            playButton.disabled = false;
+            playButton.textContent = "Play";
+        });
     </script>
     <script type="text/javascript">
         function runInit() {
+            const playButton = document.getElementById("play-button");
+            playButton.disabled = true;
+            const loadingText = "Loading";
+            playButton.textContent = loadingText;
+            const ellipsisIntervalId = setInterval(() => {
+                if (playButton.textContent.endsWith("...")) {
+                    playButton.textContent = loadingText;
+                } else {
+                    playButton.textContent += ".";
+                }
+            }, 350);
             window.initWasm().then(() => {
+                clearInterval(ellipsisIntervalId); // the button is going to vanish but I still want to clear the interval, it seems responsible
                 let preGameMenu = document.querySelector("main");
                 preGameMenu.style.display = "none";
                 console.log("WASM module loaded");
+            }).catch((err) => {
+                clearInterval(ellipsisIntervalId);
+                playButton.textContent = "Error :(";
+                console.error("Error loading WASM module:", err);
+                alert("Loading failed. Consider refreshing and trying again.")
             });
         }
     </script>
     <main class="pregamemenu">
         <h1 class="title">Shootin' Monsters</h1>
-        <button class="play-button" onclick="runInit()">Play</button>
+        <button id="play-button" class="play-button" onclick="runInit()" disabled>Loading...</button>
     </main>
 </body>
 
