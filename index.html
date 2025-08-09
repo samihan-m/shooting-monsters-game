@@ -78,6 +78,7 @@
 <body id="app">
     <script type="module">
         import init from "./pkg/shooting_monsters_game.js";
+        fetch("./pkg/shooting_monsters_game_bg.wasm"); // start downloading the wasm file _now_ instead of inside init() is called to save on load time
         window.initWasm = init;
         document.addEventListener("DOMContentLoaded", () => {
             const playButton = document.getElementById("play-button");
